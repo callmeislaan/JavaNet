@@ -5,7 +5,10 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.*;
+import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
@@ -105,5 +108,70 @@ public class Server {
 //            output.print(response);
 //            output.flush();
         }
+    }
+
+
+
+    private static HttpRequest parseHttp(String request) {
+        HttpRequest httpRequest = new HttpRequest();
+        String[] requestLines = request.split("\r\n");
+
+        // parse header
+        // dòng đầu tiên là request-line
+        String[] requestLine = requestLines[0].split(" ");
+        httpRequest.method = requestLine[0];
+        httpRequest.path = requestLine[1];
+        httpRequest.version = requestLine[2];
+
+        // các dòng tiếp theo là request header
+        int i = 1;
+        while (i < requestLines.length) {
+            String line = requestLines[i++];
+            if (line.isEmpty()) {
+                break;
+            }
+            String[] header = line.split(": "); // KEY: VALUE
+            httpRequest.headers.put(header[0], header[1]);
+        }
+
+        // parse body
+        if (httpRequest.headers.containsKey("Transfer-Encoding") &&
+                httpRequest.headers.get("Transfer-Encoding").equalsIgnoreCase("chunked")) {
+            StringBuilder bodyBuilder = new StringBuilder();
+            // trường hợp chunked, ta parse từng chunk một
+            while (i < requestLines.length) {
+                String line = requestLines[i++];
+                int chunkSize = Integer.parseInt(line, 16); // parse int từ cơ số 16 (hex)
+                if (chunkSize == 0) {
+                    break;
+                }
+                while (chunkSize > 0 && i < requestLines.length) {
+                    line = requestLines[i++];
+                    int len = Math.min(chunkSize, line.length());
+                    bodyBuilder.append(line, 0, len);
+                    chunkSize -= len;
+                }
+                i++;
+            }
+            httpRequest.body = bodyBuilder.toString();
+        } else if (httpRequest.headers.containsKey("Content-Length")) {
+            int contentLength = Integer.parseInt(httpRequest.headers.get("Content-Length"));
+            StringBuilder bodyBuilder = new StringBuilder();
+            while (bodyBuilder.length() < contentLength && i < requestLines.length) {
+                bodyBuilder.append(requestLines[i]);
+                bodyBuilder.append("\r\n");
+                i++;
+            }
+            httpRequest.body = bodyBuilder.toString().trim();
+        }
+        return httpRequest;
+    }
+
+    private static final class HttpRequest {
+        public String method;
+        public String path;
+        public String version;
+        public Map<String, String> headers = new HashMap<>();
+        public String body;
     }
 }
